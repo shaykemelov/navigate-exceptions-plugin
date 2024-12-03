@@ -40,23 +40,53 @@ class CatchSectionRelateItemLineMarkerProvider : RelatedItemLineMarkerProvider()
         catchSection: PsiCatchSection
     ): List<PsiThrowStatement> {
 
-        val methodCallExpressions = mutableListOf<PsiMethodCallExpression>()
-        recursivelyFindAllMethodCallExpressions(project, catchSection.tryStatement.tryBlock!!, methodCallExpressions)
+        val throwStatementsCollector = mutableListOf<PsiThrowStatement>()
 
-        val throwStatements = mutableListOf<PsiThrowStatement>()
-        methodCallExpressions
-            .mapNotNull { it.resolveMethod() }
-            .forEach { resolvedMethod ->
-                if (resolvedMethod.containingClass?.isInterface == true) {
-                    ClassInheritorsSearch.search(resolvedMethod.containingClass!!)
-                        .forEach { findAllThrowStatements(project, it.findMethodBySignature(resolvedMethod, true), catchSection.catchType!!, throwStatements) }
-                } else {
-                    findAllThrowStatements(project, resolvedMethod, catchSection.catchType!!, throwStatements)
+        val visitingElementsQueue = mutableListOf<PsiElement>()
+        visitingElementsQueue.add(catchSection.tryStatement.tryBlock!!)
+
+        while (visitingElementsQueue.isNotEmpty()) {
+
+            val visitingElement = visitingElementsQueue.removeFirst()
+            goDeepAndCollectThrowsWithMatchingException(visitingElement, catchSection.catchType!!, throwStatementsCollector)
+
+            val methodCallExpressions = mutableListOf<PsiMethodCallExpression>()
+            recursivelyFindAllMethodCallExpressions(project, visitingElement, methodCallExpressions)
+
+            methodCallExpressions
+                .mapNotNull(PsiMethodCallExpression::resolveMethod)
+                .forEach { method ->
+                    if (method.containingClass?.isInterface == true) {
+                        ClassInheritorsSearch.search(method.containingClass!!).forEach { clazz ->
+                                val methodInClazz = clazz.findMethodBySignature(method, true)
+                                methodInClazz?.children?.forEach { child -> visitingElementsQueue.add(child) }
+                            }
+                    } else {
+                        method.children.forEach { child -> visitingElementsQueue.add(child) }
+                    }
                 }
+        }
 
+        return throwStatementsCollector
+    }
+
+    private fun goDeepAndCollectThrowsWithMatchingException(
+        element: PsiElement,
+        catchingException: PsiType,
+        throwStatementsCollector: MutableList<PsiThrowStatement>
+    ) {
+
+        if (element is PsiThrowStatement) {
+
+            if (catchingException.isAssignableFrom(element.exception!!.type!!)) {
+
+                throwStatementsCollector.add(element)
             }
+        }
 
-        return throwStatements
+        element.children.forEach { child ->
+            goDeepAndCollectThrowsWithMatchingException(child, catchingException, throwStatementsCollector)
+        }
     }
 
     private fun findAllThrowStatements(

@@ -25,11 +25,24 @@ class ThrowStatementRelatedItemLineMarkerProvider : RelatedItemLineMarkerProvide
             return
         }
 
-        val method = getMethod(element)
-        val throwStatements = findCatchSectionsHandlingException(method!!, element.containingFile!!, element.exception!!)
+        val catchSectionsV2 = findCatchSectionsHandlingThrowStatement(element)
+
+        if (catchSectionsV2.isNotEmpty()) {
+
+            val builder = NavigationGutterIconBuilder.create(NavigationIcons.THROW_ICON)
+                .setTargets(catchSectionsV2)
+                .setTooltipText("Navigate to related catch statement")
+
+            val lineMarkerInfo = builder.createLineMarkerInfo(element)
+
+            result.add(lineMarkerInfo)
+            return
+        }
+
+        val catchSections = findCatchSectionsHandlingException(element)
 
         val builder = NavigationGutterIconBuilder.create(NavigationIcons.THROW_ICON)
-            .setTargets(throwStatements)
+            .setTargets(catchSections)
             .setTooltipText("Navigate to related catch statement")
 
         val lineMarkerInfo = builder.createLineMarkerInfo(element)
@@ -37,23 +50,86 @@ class ThrowStatementRelatedItemLineMarkerProvider : RelatedItemLineMarkerProvide
         result.add(lineMarkerInfo)
     }
 
-    private fun getMethod(throwStatement: PsiElement): PsiMethod? {
-        // Get the parent of the throw statement, which should be the method containing it
-        var parent: PsiElement? = throwStatement.parent
+    // new logic
+    private fun findCatchSectionsHandlingThrowStatement(throwStatement: PsiThrowStatement): List<PsiCatchSection> {
 
-        // Traverse upwards in the PSI tree to find the containing method
-        while (parent != null && parent !is PsiMethod) {
-            parent = parent.parent
+        val originCatchSection = findCatchSectionHandlingThrowStatement(throwStatement, throwStatement.exception)
+
+        if (originCatchSection != null) {
+            return listOf(originCatchSection)
         }
 
-        return parent as? PsiMethod
+        val catchSectionsCollector = mutableListOf<PsiCatchSection>()
+
+        val startMethod = getMethod(throwStatement) ?: return emptyList()
+
+        val dataContext = DataManager.getInstance().dataContextFromFocusAsync.blockingGet(1, TimeUnit.MINUTES)
+        val project = dataContext!!.getData(PlatformDataKeys.PROJECT)!! // FIXME LATER !!
+        val scope = GlobalSearchScope.projectScope(project)
+
+        val methodsVisitingQueue = linkedMapOf(Pair(startMethod.getSignature(PsiSubstitutor.EMPTY), startMethod))
+        startMethod.findSuperMethods().forEach { superMethod -> methodsVisitingQueue[superMethod.getSignature(PsiSubstitutor.EMPTY)] = superMethod }
+
+        while (methodsVisitingQueue.isNotEmpty()) {
+
+            val visitingMethod = methodsVisitingQueue.first()
+            methodsVisitingQueue.remove(visitingMethod.key)
+
+            MethodReferencesSearch.search(visitingMethod.value, scope, true).forEach { reference ->
+                val resolvedVisitingMethodElement = reference.element
+                val catchSection =
+                    findCatchSectionHandlingThrowStatement(resolvedVisitingMethodElement, throwStatement.exception)
+                if (catchSection != null) {
+                    catchSectionsCollector.add(catchSection)
+                } else {
+                    val method = getMethod(resolvedVisitingMethodElement)
+
+                    if (method != null) {
+                        methodsVisitingQueue[method.getSignature(PsiSubstitutor.EMPTY)] = method
+                        method.findSuperMethods().forEach { superMethod -> methodsVisitingQueue[superMethod.getSignature(PsiSubstitutor.EMPTY)] = superMethod }
+                    }
+                }
+            }
+        }
+
+        return catchSectionsCollector
     }
 
+    private fun findCatchSectionHandlingThrowStatement(
+        element: PsiElement?,
+        throwingExpression: PsiExpression?
+    ): PsiCatchSection? {
+
+        if (element == null) {
+            return null
+        }
+
+        var parent = element.parent
+
+        do {
+
+            if (parent is PsiTryStatement) {
+                val catchSection = parent.catchSections.firstOrNull { catchSection ->
+                    isExceptionHandled(catchSection.catchType!!, throwingExpression!!)
+                }
+
+                if (catchSection != null) {
+                    return catchSection
+                }
+            }
+
+            parent = parent.parent
+        } while (parent != null)
+
+        return null
+    }
+    //
+
     private fun findCatchSectionsHandlingException(
-        startMethod: PsiMethod,
-        file: PsiFile,
-        thrownException: PsiExpression
+        throwStatement: PsiThrowStatement
     ): List<PsiCatchSection> {
+
+        val startMethod = getMethod(throwStatement) ?: return emptyList()
 
         val dataContext = DataManager.getInstance().dataContextFromFocusAsync.blockingGet(1, TimeUnit.MINUTES)
         val project = dataContext!!.getData(PlatformDataKeys.PROJECT)!! // FIXME LATER !!
@@ -83,14 +159,15 @@ class ThrowStatementRelatedItemLineMarkerProvider : RelatedItemLineMarkerProvide
 
                 val methodToVisit = getMethod(reference.element)
                 if (methodToVisit == null
-                    || globalVisitedMethods.contains(methodToVisit.getSignature(PsiSubstitutor.EMPTY))) {
+                    || globalVisitedMethods.contains(methodToVisit.getSignature(PsiSubstitutor.EMPTY))
+                ) {
                     return@forEach
                 }
 
                 localVisitedMethods.add(methodToVisit.getSignature(PsiSubstitutor.EMPTY))
 
                 val tryStatement = getTryStatement(reference)
-                val catches = findAllCatchesHandlingException(tryStatement, thrownException)
+                val catches = findAllCatchesHandlingException(tryStatement, throwStatement.exception)
                 if (catches.isEmpty()) {
                     localMethodsToVisit[methodToVisit.getSignature(PsiSubstitutor.EMPTY)] = methodToVisit
                 } else {
@@ -102,6 +179,23 @@ class ThrowStatementRelatedItemLineMarkerProvider : RelatedItemLineMarkerProvide
         }
 
         return catchSections
+    }
+
+    private fun getMethod(element: PsiElement?): PsiMethod? {
+
+        if (element == null) {
+            return null
+        }
+
+        // Get the parent of the throw statement, which should be the method containing it
+        var parent: PsiElement? = element.parent
+
+        // Traverse upwards in the PSI tree to find the containing method
+        while (parent != null && parent !is PsiMethod) {
+            parent = parent.parent
+        }
+
+        return parent as? PsiMethod
     }
 
     private fun isReferenceIsInRealJavaCode(reference: PsiReference): Boolean {
@@ -125,10 +219,10 @@ class ThrowStatementRelatedItemLineMarkerProvider : RelatedItemLineMarkerProvide
 
     private fun findAllCatchesHandlingException(
         tryStatement: PsiTryStatement?,
-        thrownException: PsiExpression
+        thrownException: PsiExpression?
     ): List<PsiCatchSection> {
 
-        if (tryStatement == null) {
+        if (tryStatement == null || thrownException == null) {
             return listOf()
         }
 
