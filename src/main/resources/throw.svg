@@ -1,4 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none">
-    <rect width="16" height="16" fill="#2B2B2B" rx="2"/>
-    <text x="4" y="11" fill="#F89820" font-family="Arial, sans-serif" font-size="8" font-weight="bold">C</text>
+    <!-- Background (transparent) -->
+    <rect width="16" height="16" fill="none"/>
+
+    <!-- Catching symbol (hand-like curve) -->
+    <path d="M5 10C5 8.5 7.5 6 8 6C8.5 6 11 8.5 11 10" stroke="#FEBF10" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Dot representing the caught object -->
+    <circle cx="8" cy="10" r="1" fill="#FEBF10"/>
 </svg>

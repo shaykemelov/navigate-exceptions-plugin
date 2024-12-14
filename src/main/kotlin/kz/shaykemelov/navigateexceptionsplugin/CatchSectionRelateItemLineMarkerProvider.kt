@@ -21,14 +21,30 @@ class CatchSectionRelateItemLineMarkerProvider : RelatedItemLineMarkerProvider()
             return
         }
 
+        if (element.catchType == null) {
+            return
+        }
+
         val dataContext = DataManager.getInstance().dataContextFromFocusAsync.blockingGet(1, TimeUnit.MINUTES)
         val project = dataContext!!.getData(PlatformDataKeys.PROJECT)!! // FIXME LATER !!
 
         val throwStatements = findAllThrowStatements(project, element)
 
+        if (throwStatements.isEmpty()) {
+
+            val builder = NavigationGutterIconBuilder.create(NavigationIcons.CATCH_ICON)
+                .setTargets(emptyList())
+                .setTooltipText("No related throw statement(s)")
+
+            val lineMarkerInfo = builder.createLineMarkerInfo(element)
+
+            result.add(lineMarkerInfo)
+            return
+        }
+
         val builder = NavigationGutterIconBuilder.create(NavigationIcons.CATCH_ICON)
             .setTargets(throwStatements)
-            .setTooltipText("Navigate to related throw statements")
+            .setTooltipText("Navigate to related throw statement(s)")
 
         val lineMarkerInfo = builder.createLineMarkerInfo(element)
 
