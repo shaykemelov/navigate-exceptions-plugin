@@ -1,0 +1,2 @@
+Throw statements:
+- Mark visited method calls and do not visit them to escape cyclic moves

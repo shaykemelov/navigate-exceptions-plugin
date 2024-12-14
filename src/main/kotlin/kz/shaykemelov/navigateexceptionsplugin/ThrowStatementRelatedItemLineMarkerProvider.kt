@@ -8,7 +8,6 @@ import com.intellij.openapi.actionSystem.PlatformDataKeys
 import com.intellij.psi.*
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.searches.MethodReferencesSearch
-import com.jetbrains.rd.util.first
 import java.util.concurrent.TimeUnit
 
 class ThrowStatementRelatedItemLineMarkerProvider : RelatedItemLineMarkerProvider() {
@@ -69,15 +68,29 @@ class ThrowStatementRelatedItemLineMarkerProvider : RelatedItemLineMarkerProvide
         val project = dataContext!!.getData(PlatformDataKeys.PROJECT)!! // FIXME LATER !!
         val scope = GlobalSearchScope.projectScope(project)
 
-        val methodsVisitingQueue = linkedMapOf(Pair(startMethod.getSignature(PsiSubstitutor.EMPTY), startMethod))
-        startMethod.findSuperMethods().forEach { superMethod -> methodsVisitingQueue[superMethod.getSignature(PsiSubstitutor.EMPTY)] = superMethod }
+        val globalVisitedMethods = mutableSetOf<VisitingMethod>()
+
+        val startVisitingMethod =
+            VisitingMethod(startMethod.containingClass!!, startMethod.getSignature(PsiSubstitutor.EMPTY), startMethod)
+
+        val methodsVisitingQueue = linkedSetOf(startVisitingMethod)
+        startMethod.findSuperMethods().forEach { superMethod ->
+
+            val superVisitingMethod = VisitingMethod(
+                superMethod.containingClass!!,
+                superMethod.getSignature(PsiSubstitutor.EMPTY),
+                superMethod
+            )
+
+            methodsVisitingQueue.add(superVisitingMethod)
+        }
 
         while (methodsVisitingQueue.isNotEmpty()) {
 
             val visitingMethod = methodsVisitingQueue.first()
-            methodsVisitingQueue.remove(visitingMethod.key)
+            methodsVisitingQueue.remove(visitingMethod)
 
-            MethodReferencesSearch.search(visitingMethod.value, scope, true).forEach { reference ->
+            MethodReferencesSearch.search(visitingMethod.method, scope, true).forEach { reference ->
                 val resolvedVisitingMethodElement = reference.element
                 val catchSection =
                     findCatchSectionHandlingThrowStatement(resolvedVisitingMethodElement, throwStatement.exception)
@@ -90,8 +103,27 @@ class ThrowStatementRelatedItemLineMarkerProvider : RelatedItemLineMarkerProvide
 
                     if (method != null) {
 
-                        methodsVisitingQueue[method.getSignature(PsiSubstitutor.EMPTY)] = method
-                        method.findSuperMethods().forEach { superMethod -> methodsVisitingQueue[superMethod.getSignature(PsiSubstitutor.EMPTY)] = superMethod }
+                        if (!globalVisitedMethods.contains(visitingMethod)) {
+
+                            val vm = VisitingMethod(
+                                method.containingClass!!,
+                                method.getSignature(PsiSubstitutor.EMPTY),
+                                method
+                            )
+
+                            methodsVisitingQueue.add(vm)
+
+                            method.findSuperMethods().forEach { superMethod ->
+
+                                val superVisitingMethod = VisitingMethod(
+                                    superMethod.containingClass!!,
+                                    superMethod.getSignature(PsiSubstitutor.EMPTY),
+                                    superMethod
+                                )
+
+                                methodsVisitingQueue.add(superVisitingMethod)
+                            }
+                        }
                     }
                 }
             }
