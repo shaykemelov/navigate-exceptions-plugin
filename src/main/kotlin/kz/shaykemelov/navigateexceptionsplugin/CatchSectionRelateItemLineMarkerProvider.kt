@@ -44,7 +44,7 @@ class CatchSectionRelateItemLineMarkerProvider : RelatedItemLineMarkerProvider()
 
         val builder = NavigationGutterIconBuilder.create(NavigationIcons.CATCH_ICON)
             .setTargets(throwStatements)
-            .setCellRenderer { CustomNavigationCellRenderer() }
+            .setTargetRenderer { CustomNavigationTargetRenderer() }
             .setTooltipText("Navigate to related throw statement(s)")
 
         val lineMarkerInfo = builder.createLineMarkerInfo(element)

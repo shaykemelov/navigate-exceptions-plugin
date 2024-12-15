@@ -45,7 +45,7 @@ class ThrowStatementRelatedItemLineMarkerProvider : RelatedItemLineMarkerProvide
 
         val builder = NavigationGutterIconBuilder.create(NavigationIcons.THROW_ICON)
             .setTargets(catchSectionsV2)
-            .setCellRenderer { CustomNavigationCellRenderer() }
+            .setTargetRenderer { CustomNavigationTargetRenderer() }
             .setTooltipText("Navigate to related catch block(s)")
             .setPopupTitle("Related Catch Blocks")
 
@@ -158,10 +158,12 @@ class ThrowStatementRelatedItemLineMarkerProvider : RelatedItemLineMarkerProvide
 
             if (parent is PsiTryStatement) {
 
-                val finallyBlock = parent.finallyBlock
-                if (finallyBlock != null) {
+                if (!hasOuterCatchSection) {
+                    val finallyBlock = parent.finallyBlock
+                    if (finallyBlock != null) {
 
-                    hasOuterCatchSection = PsiTreeUtil.isAncestor(finallyBlock, element, false);
+                        hasOuterCatchSection = PsiTreeUtil.isAncestor(finallyBlock, element, false);
+                    }
                 }
 
                 if (hasOuterCatchSection) {

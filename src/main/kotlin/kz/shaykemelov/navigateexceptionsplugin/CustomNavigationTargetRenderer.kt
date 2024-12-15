@@ -1,19 +1,18 @@
 package kz.shaykemelov.navigateexceptionsplugin
 
-import com.intellij.ide.util.PsiElementListCellRenderer
+import com.intellij.codeInsight.navigation.impl.PsiTargetPresentationRenderer
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
-import com.intellij.psi.PsiNamedElement
+import com.intellij.psi.presentation.java.SymbolPresentationUtil
+import org.jetbrains.annotations.Nls
 
-class CustomNavigationCellRenderer : PsiElementListCellRenderer<PsiElement>() {
-    override fun getElementText(element: PsiElement?): String {
-        if (element is PsiNamedElement) {
-            return element.name!!
-        }
-        return element!!.text
-    }
 
-    override fun getContainerText(element: PsiElement?, name: String?): String? {
+class CustomNavigationTargetRenderer : PsiTargetPresentationRenderer<PsiElement>() {
+    @Nls
+    override fun getElementText(element: PsiElement): String = SymbolPresentationUtil.getSymbolPresentableText(element)
+
+    @Nls
+    override fun getContainerText(element: PsiElement): String? {
         val containingFile = element!!.containingFile
         if (containingFile != null) {
             val fileName = containingFile.name
