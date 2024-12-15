@@ -3,6 +3,7 @@ package kz.shaykemelov.navigateexceptionsplugin
 import com.intellij.codeInsight.daemon.RelatedItemLineMarkerInfo
 import com.intellij.codeInsight.daemon.RelatedItemLineMarkerProvider
 import com.intellij.codeInsight.navigation.NavigationGutterIconBuilder
+import com.intellij.codeInspection.isInheritorOf
 import com.intellij.ide.DataManager
 import com.intellij.openapi.actionSystem.PlatformDataKeys
 import com.intellij.openapi.project.Project
@@ -64,7 +65,12 @@ class CatchSectionRelateItemLineMarkerProvider : RelatedItemLineMarkerProvider()
         while (visitingElementsQueue.isNotEmpty()) {
 
             val visitingElement = visitingElementsQueue.removeFirst()
-            goDeepAndCollectThrowsWithMatchingException(visitingElement, catchSection.catchType!!, throwStatementsCollector)
+            goDeepAndCollectThrowsWithMatchingException(
+                visitingElement,
+                catchSection.catchType!!,
+                throwStatementsCollector,
+                null
+            )
 
             val methodCallExpressions = mutableListOf<PsiMethodCallExpression>()
             recursivelyFindAllMethodCallExpressions(project, visitingElement, methodCallExpressions)
@@ -74,9 +80,9 @@ class CatchSectionRelateItemLineMarkerProvider : RelatedItemLineMarkerProvider()
                 .forEach { method ->
                     if (method.containingClass?.isInterface == true) {
                         ClassInheritorsSearch.search(method.containingClass!!).forEach { clazz ->
-                                val methodInClazz = clazz.findMethodBySignature(method, true)
-                                methodInClazz?.children?.forEach { child -> visitingElementsQueue.add(child) }
-                            }
+                            val methodInClazz = clazz.findMethodBySignature(method, true)
+                            methodInClazz?.children?.forEach { child -> visitingElementsQueue.add(child) }
+                        }
                     } else {
                         method.children.forEach { child -> visitingElementsQueue.add(child) }
                     }
@@ -89,50 +95,33 @@ class CatchSectionRelateItemLineMarkerProvider : RelatedItemLineMarkerProvider()
     private fun goDeepAndCollectThrowsWithMatchingException(
         element: PsiElement,
         catchingException: PsiType,
-        throwStatementsCollector: MutableList<PsiThrowStatement>
+        throwStatementsCollector: MutableList<PsiThrowStatement>,
+        tryStatement: PsiTryStatement?
     ) {
-
-        if (element is PsiThrowStatement) {
-
-            if (catchingException.isAssignableFrom(element.exception!!.type!!)) {
-
+        if (element is PsiTryStatement) {
+            element.tryBlock?.children?.forEach { child ->
+                goDeepAndCollectThrowsWithMatchingException(child, catchingException, throwStatementsCollector, element)
+            }
+            element.catchSections.forEach { child ->
+                goDeepAndCollectThrowsWithMatchingException(child, catchingException, throwStatementsCollector, tryStatement)
+            }
+            element.finallyBlock?.children?.forEach { child ->
+                goDeepAndCollectThrowsWithMatchingException(child, catchingException, throwStatementsCollector, tryStatement)
+            }
+        } else if (element is PsiThrowStatement) {
+            if (tryStatement == null) {
                 throwStatementsCollector.add(element)
+                return
+            }
+
+            tryStatement.catchSections.any { catchSection ->
+                catchSection.catchType?.isAssignableFrom(catchingException) == true
+            }
+        } else {
+            element.children.forEach { child ->
+                goDeepAndCollectThrowsWithMatchingException(child, catchingException, throwStatementsCollector, tryStatement)
             }
         }
-
-        element.children.forEach { child ->
-            goDeepAndCollectThrowsWithMatchingException(child, catchingException, throwStatementsCollector)
-        }
-    }
-
-    private fun findAllThrowStatements(
-        project: Project,
-        method: PsiMethod?,
-        catchingException: PsiType,
-        resultCollector: MutableList<PsiThrowStatement>
-    ) {
-
-        method?.children?.forEach { recursivelyFindAllThrowStatements(project, it, catchingException, resultCollector) }
-    }
-
-    private fun recursivelyFindAllThrowStatements(
-        project: Project,
-        element: PsiElement,
-        catchingException: PsiType,
-        resultCollector: MutableList<PsiThrowStatement>
-    ) {
-
-        if (element.containingFile.project != project) {
-            return
-        }
-
-        if (element is PsiThrowStatement) {
-            if (catchingException.isAssignableFrom(element.exception?.type!!)) {
-                resultCollector.add(element)
-            }
-        }
-
-        element.children.forEach { recursivelyFindAllThrowStatements(project, it, catchingException, resultCollector) }
     }
 
     private fun recursivelyFindAllMethodCallExpressions(

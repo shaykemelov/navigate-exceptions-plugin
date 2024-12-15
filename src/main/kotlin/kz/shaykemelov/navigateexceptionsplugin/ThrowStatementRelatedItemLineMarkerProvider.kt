@@ -8,6 +8,7 @@ import com.intellij.openapi.actionSystem.PlatformDataKeys
 import com.intellij.psi.*
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.searches.MethodReferencesSearch
+import com.intellij.psi.util.PsiTreeUtil
 import java.util.concurrent.TimeUnit
 
 class ThrowStatementRelatedItemLineMarkerProvider : RelatedItemLineMarkerProvider() {
@@ -153,6 +154,12 @@ class ThrowStatementRelatedItemLineMarkerProvider : RelatedItemLineMarkerProvide
             }
 
             if (parent is PsiTryStatement) {
+
+                val finallyBlock = parent.finallyBlock
+                if (finallyBlock != null) {
+
+                    hasOuterCatchSection = PsiTreeUtil.isAncestor(finallyBlock, element, false);
+                }
 
                 if (hasOuterCatchSection) {
 
