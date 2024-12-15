@@ -6,7 +6,6 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.presentation.java.SymbolPresentationUtil
 import org.jetbrains.annotations.Nls
 
-
 class CustomNavigationTargetRenderer : PsiTargetPresentationRenderer<PsiElement>() {
     @Nls
     override fun getElementText(element: PsiElement): String = SymbolPresentationUtil.getSymbolPresentableText(element)
