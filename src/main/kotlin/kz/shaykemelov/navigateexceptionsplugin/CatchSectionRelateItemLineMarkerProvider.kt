@@ -109,12 +109,16 @@ class CatchSectionRelateItemLineMarkerProvider : RelatedItemLineMarkerProvider()
                 goDeepAndCollectThrowsWithMatchingException(child, catchingException, throwStatementsCollector, tryStatement)
             }
         } else if (element is PsiThrowStatement) {
-            if (tryStatement == null) {
+            if ((tryStatement == null
+                        && element.exception != null
+                        && element.exception!!.type != null)
+                && catchingException.isAssignableFrom(element.exception!!.type!!)
+            ) {
                 throwStatementsCollector.add(element)
                 return
             }
 
-            tryStatement.catchSections.any { catchSection ->
+            tryStatement?.catchSections?.any { catchSection ->
                 catchSection.catchType?.isAssignableFrom(catchingException) == true
             }
         } else {
