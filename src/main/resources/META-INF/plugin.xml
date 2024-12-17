@@ -14,7 +14,25 @@
          Simple HTML elements (text formatting, paragraphs, and lists) can be added inside of <![CDATA[ ]]> tag.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/plugin-overview-page.html#plugin-description -->
     <description><![CDATA[
-    Plugin helps you to navigate exceptions.
+    <p>Plugin helps you to navigate exceptions</p>
+
+    <p>Just click on gutter icon to navigate to related catch sections or throw statements</p>
+
+    <p>If there are no related items icon will not be clickable</p>
+
+    <p>Supported languages:</p>
+    <ul>
+        <li>Java</li>
+    </ul>
+
+    <p>Unsupported:</p>
+    <ul>
+        <li>Proxies in Spring like @RestControllerAdvice and any other Aspects</li>
+        <li>Method calls via reflection</li>
+        <li>Something else probably</li>
+    </ul>
+
+    <p>You can probably notice performance issues with deep and wide stack calls</p>
 ]]></description>
 
     <!-- Product and plugin compatibility requirements.
