@@ -64,7 +64,7 @@ class CatchSectionRelateItemLineMarkerProvider : RelatedItemLineMarkerProvider()
 
         while (visitingElementsQueue.isNotEmpty()) {
 
-            val visitingElement = visitingElementsQueue.removeFirst()
+            val visitingElement = visitingElementsQueue.removeAt(0)
             goDeepAndCollectThrowsWithMatchingException(
                 visitingElement,
                 catchSection.catchType!!,
