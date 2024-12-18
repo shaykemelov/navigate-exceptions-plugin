@@ -8,7 +8,9 @@ import com.intellij.openapi.actionSystem.PlatformDataKeys
 import com.intellij.openapi.project.Project
 import com.intellij.psi.*
 import com.intellij.psi.search.searches.ClassInheritorsSearch
+import com.intellij.psi.util.PsiUtil
 import java.util.concurrent.TimeUnit
+
 
 class CatchSectionRelateItemLineMarkerProvider : RelatedItemLineMarkerProvider() {
 
@@ -57,7 +59,15 @@ class CatchSectionRelateItemLineMarkerProvider : RelatedItemLineMarkerProvider()
         catchSection: PsiCatchSection
     ): List<PsiThrowStatement> {
 
+        val catchingException = catchSection.catchType ?: return emptyList()
+        val isCheckedException = isCheckedException(catchingException, project)
+
         val throwStatementsCollector = mutableListOf<PsiThrowStatement>()
+
+        val startMethod = getMethod(catchSection) ?: return emptyList()
+        val signature = startMethod.getSignature(PsiSubstitutor.EMPTY)
+        val startVisitingMethod = VisitingMethod(startMethod.containingClass!!, signature, startMethod)
+        val globalVisitedMethods = mutableSetOf(startVisitingMethod)
 
         val visitingElementsQueue = mutableListOf<PsiElement>()
         visitingElementsQueue.add(catchSection.tryStatement.tryBlock!!)
@@ -65,84 +75,146 @@ class CatchSectionRelateItemLineMarkerProvider : RelatedItemLineMarkerProvider()
         while (visitingElementsQueue.isNotEmpty()) {
 
             val visitingElement = visitingElementsQueue.removeAt(0)
-            goDeepAndCollectThrowsWithMatchingException(
+
+            visitElement(
                 visitingElement,
-                catchSection.catchType!!,
-                throwStatementsCollector,
-                null
+                catchingException,
+                isCheckedException,
+                globalVisitedMethods,
+                visitingElementsQueue,
+                throwStatementsCollector
             )
-
-            val methodCallExpressions = mutableListOf<PsiMethodCallExpression>()
-            recursivelyFindAllMethodCallExpressions(project, visitingElement, methodCallExpressions)
-
-            methodCallExpressions
-                .mapNotNull(PsiMethodCallExpression::resolveMethod)
-                .forEach { method ->
-                    if (method.containingClass?.isInterface == true) {
-                        ClassInheritorsSearch.search(method.containingClass!!).forEach { clazz ->
-                            val methodInClazz = clazz.findMethodBySignature(method, true)
-                            methodInClazz?.children?.forEach { child -> visitingElementsQueue.add(child) }
-                        }
-                    } else {
-                        method.children.forEach { child -> visitingElementsQueue.add(child) }
-                    }
-                }
         }
 
         return throwStatementsCollector
     }
 
-    private fun goDeepAndCollectThrowsWithMatchingException(
+    private fun visitElement(
         element: PsiElement,
         catchingException: PsiType,
-        throwStatementsCollector: MutableList<PsiThrowStatement>,
-        tryStatement: PsiTryStatement?
+        isCheckedException: Boolean,
+        visitedMethods: MutableSet<VisitingMethod>,
+        globalElementsQueue: MutableList<PsiElement>,
+        throwStatementsCollector: MutableList<PsiThrowStatement>
     ) {
-        if (element is PsiTryStatement) {
-            element.tryBlock?.children?.forEach { child ->
-                goDeepAndCollectThrowsWithMatchingException(child, catchingException, throwStatementsCollector, element)
-            }
-            element.catchSections.forEach { child ->
-                goDeepAndCollectThrowsWithMatchingException(child, catchingException, throwStatementsCollector, tryStatement)
-            }
-            element.finallyBlock?.children?.forEach { child ->
-                goDeepAndCollectThrowsWithMatchingException(child, catchingException, throwStatementsCollector, tryStatement)
-            }
-        } else if (element is PsiThrowStatement) {
-            if ((tryStatement == null
-                        && element.exception != null
-                        && element.exception!!.type != null)
-                && catchingException.isAssignableFrom(element.exception!!.type!!)
-            ) {
-                throwStatementsCollector.add(element)
-                return
-            }
 
-            tryStatement?.catchSections?.any { catchSection ->
-                catchSection.catchType?.isAssignableFrom(catchingException) == true
-            }
-        } else {
-            element.children.forEach { child ->
-                goDeepAndCollectThrowsWithMatchingException(child, catchingException, throwStatementsCollector, tryStatement)
+        val elementsQueue = mutableListOf(element)
+
+        while (elementsQueue.isNotEmpty()) {
+            when (val currentElement = elementsQueue.removeAt(0)) {
+                is PsiTryStatement -> {
+                    if (currentElement.catchSections
+                            .any { catchSection -> catchSection.catchType?.isAssignableFrom(catchingException) == true }
+                    ) {
+                        currentElement.catchSections.forEach { catchSection -> elementsQueue.addAll(catchSection.children) }
+                        val finally = currentElement.finallyBlock
+                        if (finally != null) {
+
+                            elementsQueue.addAll(finally.children)
+                        }
+                    } else {
+
+                        elementsQueue.addAll(currentElement.children)
+                    }
+                }
+
+                is PsiThrowStatement -> {
+
+                    val currentExceptionType = currentElement.exception?.type
+                    if (currentExceptionType != null && catchingException.isAssignableFrom(currentExceptionType)) {
+
+                        throwStatementsCollector.add(currentElement)
+                    }
+                }
+
+                is PsiMethodCallExpression -> {
+                    elementsQueue.addAll(currentElement.children)
+                    val resolvedMethod = currentElement.resolveMethod() ?: continue
+                    val signature = resolvedMethod.getSignature(PsiSubstitutor.EMPTY)
+                    val visitingMethod = VisitingMethod(resolvedMethod.containingClass!!, signature, resolvedMethod)
+
+                    val resolvedMethodIsInInterface = resolvedMethod.containingClass?.isInterface == true
+
+                    if (isCheckedException) {
+
+                        val methodThrowsCatchingCheckedException =
+                            methodThrowsCheckedException(resolvedMethod, catchingException)
+
+                        if (!methodThrowsCatchingCheckedException) {
+                            continue
+                        }
+                    }
+
+                    if (!visitedMethods.contains(visitingMethod)) {
+                        globalElementsQueue.addAll(resolvedMethod.children)
+                        visitedMethods.add(visitingMethod)
+                    }
+
+                    if (resolvedMethodIsInInterface) {
+
+                        ClassInheritorsSearch.search(resolvedMethod.containingClass!!).forEach { clazz ->
+                            val methodInClazz = clazz.findMethodBySignature(resolvedMethod, true) ?: return@forEach
+                            val inheritedMethodSignature = methodInClazz.getSignature(PsiSubstitutor.EMPTY)
+                            val inheritedVisitingMethod = VisitingMethod(
+                                methodInClazz.containingClass!!,
+                                inheritedMethodSignature,
+                                methodInClazz
+                            )
+
+                            if (!visitedMethods.contains(inheritedVisitingMethod)) {
+
+                                globalElementsQueue.addAll(methodInClazz.children)
+                                visitedMethods.add(inheritedVisitingMethod)
+                            }
+                        }
+                    }
+                }
+
+                else -> {
+                    elementsQueue.addAll(currentElement.children)
+                }
             }
         }
     }
 
-    private fun recursivelyFindAllMethodCallExpressions(
-        project: Project,
-        element: PsiElement,
-        resultCollector: MutableList<PsiMethodCallExpression>
-    ) {
+    private fun isCheckedException(
+        catchingException: PsiType,
+        project: Project
+    ): Boolean {
 
-        if (element.containingFile.project != project) {
-            return
+        val exceptionClass = PsiUtil.resolveClassInType(catchingException) ?: return false
+
+        val runtimeExceptionClass = JavaPsiFacade.getInstance(project)
+            .findClass("java.lang.RuntimeException", catchingException.resolveScope!!)!!
+
+        return exceptionClass != runtimeExceptionClass
+                && !exceptionClass.isInheritor(runtimeExceptionClass, true)
+    }
+
+    private fun methodThrowsCheckedException(method: PsiMethod, checkedException: PsiType): Boolean {
+
+        return method.throwsList.referencedTypes.any { referenceType ->
+
+            val exceptionClass = PsiUtil.resolveClassInType(referenceType)
+            val exceptionBaseClass = PsiUtil.resolveClassInType(checkedException) ?: return false
+            exceptionClass?.isInheritor(exceptionBaseClass, true) == true
+        }
+    }
+
+    private fun getMethod(element: PsiElement?): PsiMethod? {
+
+        if (element == null) {
+
+            return null
         }
 
-        if (element is PsiMethodCallExpression) {
-            resultCollector.add(element)
-            return
+        var parent: PsiElement? = element.parent
+
+        while (parent != null && parent !is PsiMethod) {
+
+            parent = parent.parent
         }
 
-        element.children.forEach { recursivelyFindAllMethodCallExpressions(project, it, resultCollector) }
+        return parent as? PsiMethod
     }
 }
